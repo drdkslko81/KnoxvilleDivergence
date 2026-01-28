@@ -1,0 +1,15 @@
+niftystocks
+requests
+yfinance
+pandas
+numpy
+ta
+matplotlib
+openpyxl
+streamlit
+exchange_calendars
+supabase
+bcrypt
+beautifulsoup4
+backtrader
+plotly
