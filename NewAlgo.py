@@ -131,7 +131,7 @@ with tab1:
     show_debug = st.toggle("🔧 Show Debug Info", value=False)
 
     # Freshness mode: only signals on latest bar
-    only_latest_bar = st.toggle("✅ Only show signals on latest bar", value=True)
+    only_latest_bar = st.toggle("✅ Only show signals on latest bar", value=False)
 
     if st.button("🔍 Scan For Signals", type="primary"):
         signals = []
