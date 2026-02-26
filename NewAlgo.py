@@ -30,7 +30,6 @@ def get_nifty50_symbols():
         'BPCL.NS', 'HINDALCO.NS', 'INDUSINDBK.NS', 'BRITANNIA.NS', 'M&M.NS'
     ]
 
-
 def detect_knoxville_divergence(df, rsi_period=14, mom_period=12, lb=3):
     """Detect bullish/bearish divergence using RSI + pivot points."""
     df = df.copy()
@@ -82,7 +81,6 @@ def detect_knoxville_divergence(df, rsi_period=14, mom_period=12, lb=3):
 
     return df
 
-
 @st.cache_data(ttl=3600)
 def fetch_data(symbol, start, end):
     """Fetch yfinance data with error handling. yfinance end is exclusive."""
@@ -94,7 +92,6 @@ def fetch_data(symbol, start, end):
     except Exception:
         return None
 
-
 def calculate_holding_days(buy_date_str, sell_date_str):
     """Calculate calendar days between buy and sell dates."""
     try:
@@ -104,7 +101,6 @@ def calculate_holding_days(buy_date_str, sell_date_str):
     except Exception:
         return 0
 
-
 # =========================
 # Main UI
 # =========================
@@ -112,7 +108,7 @@ def calculate_holding_days(buy_date_str, sell_date_str):
 st.title("🔔Swing Trading")
 st.markdown("**Nifty 50 scanner**")
 
-tab1, tab2 = st.tabs(["📈 Live Scanner", "⚙️ Backtester"])
+tab1, tab2, tab3 = st.tabs(["📈 Live Scanner", "⚙️ Backtester", "📋 Exit Signals"])
 
 # =========================
 # TAB 1: Live Scanner
@@ -129,8 +125,6 @@ with tab1:
         st.info(f"🔄 Using default Nifty 50 ({len(symbols)} stocks)")
 
     show_debug = st.toggle("🔧 Show Debug Info", value=False)
-
-    # Freshness mode: only signals on latest bar
     only_latest_bar = st.toggle("✅ Only show signals on latest bar", value=False)
 
     if st.button("🔍 Scan For Signals", type="primary"):
@@ -138,7 +132,6 @@ with tab1:
         progress = st.progress(0)
         debug_container = st.container()
 
-        # For live scan, include today's bar by using end = tomorrow
         today = datetime.today().date()
         scan_start = "2025-01-01"
         scan_end = today + timedelta(days=1)
@@ -150,21 +143,15 @@ with tab1:
                     signals_df = detect_knoxville_divergence(data.tail(300))
 
                     if not signals_df.empty:
-                        # All signal rows
                         signal_rows = signals_df[(signals_df['Buy_Signal'] == 1) |
                                                  (signals_df['Sell_Signal'] == 1)]
 
                         if not signal_rows.empty:
-                            # Latest signal row in history
                             last_signal_row = signal_rows.iloc[-1]
                             last_signal_date = last_signal_row.name.date()
-
-                            # Latest bar date in data
                             last_bar_date = signals_df.index[-1].date()
 
-                            # Freshness filter
                             if only_latest_bar and last_signal_date != last_bar_date:
-                                # Skip older signals
                                 pass
                             else:
                                 if show_debug:
@@ -175,7 +162,7 @@ with tab1:
                                                 'Last_Bar_Date': last_bar_date.strftime('%Y-%m-%d'),
                                                 'RSI': f"{float(last_signal_row.get('RSI', 0)):.1f}",
                                                 'Price_vs_EMA20': float(last_signal_row.get('Close', 0)) >
-                                                                  float(last_signal_row.get('EMA20', 0)),
+                                                                   float(last_signal_row.get('EMA20', 0)),
                                                 'Signal_Type': 'BUY' if last_signal_row.get('Buy_Signal', 0) == 1
                                                 else 'SELL' if last_signal_row.get('Sell_Signal', 0) == 1
                                                 else 'NONE',
@@ -210,13 +197,28 @@ with tab1:
         if signals:
             signals_df = pd.DataFrame(signals)
             st.success(f"✅ Found {len(signals)} signals!")
-            st.dataframe(signals_df, use_container_width=True)
+            
+            # Light color coding function
+            def highlight_signals(row):
+                if row['Signal'] == 'BUY':
+                    return ['background-color: #90EE90; font-weight: bold'] * len(row)  # Light green
+                elif row['Signal'] == 'SELL':
+                    return ['background-color: #FFB6C1; font-weight: bold'] * len(row)  # Light red
+                else:
+                    return [''] * len(row)
+
+            
+            # Apply styling
+            styled_df = signals_df.style.apply(highlight_signals, axis=1)
+            styled_df = styled_df.format({
+                'Price': '₹{:.0f}',
+                'RSI': '{:.1f}'
+            })
+            
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            
             csv = signals_df.to_csv(index=False)
             st.download_button("📥 Download Signals CSV", csv, "knoxville_signals.csv")
-        else:
-            st.info("📊 No fresh signals. Check back after next EOD.")
-            if show_debug:
-                st.info("🔍 **Debug Summary**: No signals matched the freshness condition.")
 
 
 # =========================
@@ -246,11 +248,9 @@ with tab2:
         with st.spinner("🔄 Running comprehensive backtest..."):
             progress = st.progress(0)
 
-            # STEP 1: Collect ALL raw signals across ALL symbols
             all_raw_signals = []
             successful_symbols = 0
 
-            # Backtest: include end_date's bar, so use end_date + 1
             bt_end = end_date + timedelta(days=1)
 
             for i, symbol in enumerate(symbols):
@@ -285,11 +285,9 @@ with tab2:
 
                 progress.progress((i + 1) / len(symbols))
 
-            # STEP 2: Sort ALL signals chronologically
             all_raw_signals.sort(key=lambda x: x['Date'])
             st.info(f"📊 Collected {len(all_raw_signals)} signals from {successful_symbols} symbols")
 
-            # STEP 3: Process in chronological order
             all_trades = []
             capital = float(initial_capital)
             current_positions = {}
@@ -353,7 +351,6 @@ with tab2:
                 except Exception:
                     continue
 
-            # STEP 4: Calculate metrics
             sell_trades = [t for t in all_trades if t.get('Signal') == 'SELL']
             years = (end_date - start_date).days / 365.25
             cagr = ((capital / initial_capital) ** (1 / years) - 1) * 100 if years > 0 and sell_trades else 0
@@ -397,7 +394,7 @@ with tab2:
 
             st.info("""
             **📊 Position Sizing & Holding Logic:**
-            - Risk per trade: **1%** of capital 
+            - Risk per trade: **1%** of capital
             - Max position: **10%** of capital per stock
             - **Holding Days**: Calendar days from BUY to SELL signal
             - **Shares = min(risk-based, max-value shares)**
@@ -453,6 +450,138 @@ with tab2:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
+
+# =========================
+# TAB 3: Exit Signals Tracker
+# =========================
+
+with tab3:
+    st.header("📋 All Exit Signals Tracker")
+    st.markdown("**Daily SELL signals for ALL watchlist stocks** (independent of positions)")
+    
+    uploaded_file_exit = st.file_uploader("Upload stock list for exits (.txt)", type=['txt'], key='exit_uploader')
+    
+    if uploaded_file_exit is not None:
+        exit_symbols = [line.decode().strip() for line in uploaded_file_exit.readlines() if line.decode().strip()]
+    else:
+        exit_symbols = get_nifty50_symbols()
+        st.info(f"🔄 Tracking {len(exit_symbols)} stocks for exit signals")
+    
+    col_date1, col_date2 = st.columns(2)
+    with col_date1:
+        exit_start = st.date_input("Exit Scan Start", datetime.now().date() - timedelta(days=30))
+    with col_date2:
+        exit_end = st.date_input("Exit Scan End", datetime.now().date() + timedelta(days=1))
+    
+    days_back_toggle = st.toggle("Only last 7 days", value=True)
+    if days_back_toggle:
+        exit_start = max(exit_start, datetime.now().date() - timedelta(days=7))
+    
+    show_all_exits = st.toggle("Show ALL historical exits", value=False)
+    
+    if st.button("🔍 Scan Exit Signals", type="primary"):
+        exit_signals = []
+        progress = st.progress(0)
+        
+        scan_end = exit_end
+        scan_start = exit_start
+        
+        for i, symbol in enumerate(exit_symbols):
+            try:
+                data = fetch_data(symbol, scan_start - timedelta(days=10), scan_end)  # Fetch extra days for safety
+                if data is not None and len(data) > 50:
+                    signals_df = detect_knoxville_divergence(data.tail(200))
+                    
+                    # Find ALL SELL signals in the date range
+                    sell_signals = signals_df[
+                        (signals_df['Sell_Signal'] == 1) & 
+                        (signals_df.index.date >= exit_start) &
+                        (signals_df.index.date <= exit_end - timedelta(days=1))
+                    ]
+                    
+                    for date, row in sell_signals.iterrows():
+                        try:
+                            # Safe Open price lookup with fallback
+                            open_price = data['Open'].get(date, row['Close'])
+                            
+                            # Safe numeric calculation with NaN handling
+                            if pd.notna(open_price) and pd.notna(row['Close']) and open_price != 0:
+                                price_change = ((row['Close'] / open_price) - 1) * 100
+                            else:
+                                price_change = np.nan
+                                
+                            exit_signals.append({
+                                'Symbol': symbol,
+                                'Exit_Date': date.strftime('%Y-%m-%d'),
+                                'Exit_Price': float(row['Close']),
+                                'Open_Price': float(open_price),
+                                'RSI': float(row['RSI']),
+                                'Price_Change': float(price_change),  # Ensure float
+                                'Days_Ago': (datetime.now().date() - date.date()).days
+                            })
+                        except (ValueError, TypeError):
+                            continue  # Skip bad rows
+                            
+            except Exception:
+                pass
+            
+            progress.progress((i + 1) / len(exit_symbols))
+        
+        if exit_signals:
+            exit_df = pd.DataFrame(exit_signals)
+            
+            # Force numeric dtype with NaN coercion for safety
+            numeric_cols = ['Exit_Price', 'Open_Price', 'RSI', 'Price_Change']
+            for col in numeric_cols:
+                if col in exit_df.columns:
+                    exit_df[col] = pd.to_numeric(exit_df[col], errors='coerce')
+            
+            exit_df = exit_df.dropna(subset=['Price_Change'])  # Drop any remaining bad rows
+            exit_df = exit_df.sort_values('Exit_Date', ascending=False)
+            
+            st.success(f"✅ Found {len(exit_df)} exit signals!")
+            
+            # Metrics - now safe
+            col_m1, col_m2, col_m3 = st.columns(3)
+            with col_m1:
+                recent_exits = len(exit_df[exit_df['Days_Ago'] <= 7])
+                st.metric("Exits (Last 7 days)", recent_exits)
+            with col_m2:
+                avg_rsi = exit_df['RSI'].mean()
+                st.metric("Avg Exit RSI", f"{avg_rsi:.1f}")
+            # with col_m3:
+            #     avg_price_change = exit_df['Price_Change'].mean()
+            #     st.metric("Avg Day Open %", f"{avg_price_change:.1f}%")
+        
+
+
+            
+            st.dataframe(exit_df, use_container_width=True, height=500)
+            
+            # Download
+            csv_exit = exit_df.to_csv(index=False)
+            st.download_button("📥 Download Exit Signals", csv_exit, "exit_signals.csv")
+            
+            # Filter options
+            col_filter1, col_filter2 = st.columns(2)
+            with col_filter1:
+                min_days_ago = st.slider("Show exits from last", 1, 30, 7)
+            with col_filter2:
+                min_price_change = st.slider("Min Price Change %", -10.0, 10.0, -5.0)
+            
+            filtered_exits = exit_df[
+                (exit_df['Days_Ago'] <= min_days_ago) & 
+                (exit_df['Price_Change'] >= min_price_change)
+            ].sort_values('Days_Ago')
+            
+            if not filtered_exits.empty:
+                st.subheader("🔥 Recent & Significant Exits")
+                st.dataframe(filtered_exits.head(20), use_container_width=True)
+            else:
+                st.info("No exits match current filters")
+                
+        else:
+            st.info("📊 No exit signals found in the date range")
 
 st.markdown("---")
 st.caption("🎯 **Trading App**")
