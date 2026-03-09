@@ -47,15 +47,29 @@ def detect_knoxville_divergence(df, rsi_period=14, mom_period=12, lb=3):
         df['Sell_Signal'] = 0
         return df
 
+    # def is_pivot_high(series, i, window):
+    #     if i < window or i > len(series) - window - 1:
+    #         return False
+    #     return series.iloc[i] >= series.iloc[i - window:i + window + 1].max()
+
+    # def is_pivot_low(series, i, window):
+    #     if i < window or i > len(series) - window - 1:
+    #         return False
+    #     return series.iloc[i] <= series.iloc[i - window:i + window + 1].min()
+    
     def is_pivot_high(series, i, window):
-        if i < window or i > len(series) - window - 1:
+    # Past-only pivot: current high is highest of last (window+1) bars
+        if i < window:
             return False
-        return series.iloc[i] >= series.iloc[i - window:i + window + 1].max()
+        return series.iloc[i] >= series.iloc[i - window:i + 1].max()
 
     def is_pivot_low(series, i, window):
-        if i < window or i > len(series) - window - 1:
+        # Past-only pivot: current low is lowest of last (window+1) bars
+        if i < window:
             return False
-        return series.iloc[i] <= series.iloc[i - window:i + window + 1].min()
+        return series.iloc[i] <= series.iloc[i - window:i + 1].min()
+
+
 
     df['Buy_Signal'] = 0
     df['Sell_Signal'] = 0
