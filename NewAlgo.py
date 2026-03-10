@@ -112,7 +112,8 @@ def calculate_holding_days(buy_date_str, sell_date_str):
 st.title("🔔Swing Trading")
 st.markdown("**Nifty 50 scanner**")
 
-tab1, tab2 = st.tabs(["📈 Live Scanner", "⚙️ Backtester"])
+tab1, tab2, tab3 = st.tabs(["📈 Live Scanner", "⚙️ Backtester", "❌ Exit Signals"])
+
 
 # =========================
 # TAB 1: Live Scanner
@@ -129,8 +130,6 @@ with tab1:
         st.info(f"🔄 Using default Nifty 50 ({len(symbols)} stocks)")
 
     show_debug = st.toggle("🔧 Show Debug Info", value=False)
-
-    # Freshness mode: only signals on latest bar
     only_latest_bar = st.toggle("✅ Only show signals on latest bar", value=False)
 
     if st.button("🔍 Scan For Signals", type="primary"):
@@ -138,7 +137,6 @@ with tab1:
         progress = st.progress(0)
         debug_container = st.container()
 
-        # For live scan, include today's bar by using end = tomorrow
         today = datetime.today().date()
         scan_start = "2025-01-01"
         scan_end = today + timedelta(days=1)
@@ -150,21 +148,14 @@ with tab1:
                     signals_df = detect_knoxville_divergence(data.tail(300))
 
                     if not signals_df.empty:
-                        # All signal rows
                         signal_rows = signals_df[(signals_df['Buy_Signal'] == 1) |
                                                  (signals_df['Sell_Signal'] == 1)]
-
                         if not signal_rows.empty:
-                            # Latest signal row in history
                             last_signal_row = signal_rows.iloc[-1]
                             last_signal_date = last_signal_row.name.date()
-
-                            # Latest bar date in data
                             last_bar_date = signals_df.index[-1].date()
 
-                            # Freshness filter
                             if only_latest_bar and last_signal_date != last_bar_date:
-                                # Skip older signals
                                 pass
                             else:
                                 if show_debug:
@@ -175,10 +166,9 @@ with tab1:
                                                 'Last_Bar_Date': last_bar_date.strftime('%Y-%m-%d'),
                                                 'RSI': f"{float(last_signal_row.get('RSI', 0)):.1f}",
                                                 'Price_vs_EMA20': float(last_signal_row.get('Close', 0)) >
-                                                                  float(last_signal_row.get('EMA20', 0)),
+                                                              float(last_signal_row.get('EMA20', 0)),
                                                 'Signal_Type': 'BUY' if last_signal_row.get('Buy_Signal', 0) == 1
-                                                else 'SELL' if last_signal_row.get('Sell_Signal', 0) == 1
-                                                else 'NONE',
+                                                else 'SELL' if last_signal_row.get('Sell_Signal', 0) == 1 else 'NONE',
                                                 'Buy_Signal': int(last_signal_row.get('Buy_Signal', 0)),
                                                 'Sell_Signal': int(last_signal_row.get('Sell_Signal', 0)),
                                                 'Close_Price': f"₹{float(last_signal_row.get('Close', 0)):.0f}",
@@ -209,8 +199,22 @@ with tab1:
 
         if signals:
             signals_df = pd.DataFrame(signals)
+
+            # Full row coloring: green for BUY, red for SELL
+            def color_row(signal):
+                if signal == 'BUY':
+                    return ['background-color: #e8f5e9'] * len(signals_df.columns)  # light green
+                elif signal == 'SELL':
+                    return ['background-color: #ffebee'] * len(signals_df.columns)  # light red
+                return [''] * len(signals_df.columns)
+
+            styled_df = signals_df.style.format({
+                'Price': '₹{:.0f}',
+                'RSI': '{:.1f}'
+            }).apply(lambda row: color_row(row['Signal']), axis=1)
+
             st.success(f"✅ Found {len(signals)} signals!")
-            st.dataframe(signals_df, use_container_width=True)
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
             csv = signals_df.to_csv(index=False)
             st.download_button("📥 Download Signals CSV", csv, "knoxville_signals.csv")
         else:
@@ -453,6 +457,106 @@ with tab2:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
+            
+# =========================
+# TAB 3: Exit Signals (SELL only)
+# =========================
+# =========================
+# TAB 3: Exit Signals (SELL only)
+# =========================
+with tab3:
+    st.header("❌ Exit Signals Scanner")
+    st.markdown("**Only SELL signals from Nifty 50 universe**")
+    
+    uploaded_file = st.file_uploader("Upload stock list (.txt)", type=['txt'], key="upload_exit")
+    
+    if uploaded_file is not None:
+        exit_symbols = [line.decode().strip() for line in uploaded_file.readlines() if line.decode().strip()]
+    else:
+        exit_symbols = get_nifty50_symbols()
+        st.info(f"🔄 Scanning {len(exit_symbols)} Nifty stocks for SELL signals")
+
+    show_debug_exit = st.toggle("🔧 Show Debug Info", value=False, key="debug_exit")
+    only_latest_bar_exit = st.toggle("✅ Only latest bar signals", value=True, key="latest_exit")
+
+    if st.button("🔍 Scan Exit Signals", type="primary"):
+        exit_signals = []
+        progress = st.progress(0)
+        debug_container_exit = st.container()
+
+        today = datetime.today().date()
+        scan_start = "2025-01-01"
+        scan_end = today + timedelta(days=1)
+
+        for i, symbol in enumerate(exit_symbols):
+            try:
+                data = fetch_data(symbol, scan_start, scan_end)
+                if data is not None and len(data) > 100:
+                    signals_df = detect_knoxville_divergence(data.tail(300))
+
+                    if not signals_df.empty:
+                        # ONLY SELL signals
+                        sell_rows = signals_df[signals_df['Sell_Signal'] == 1]
+                        
+                        if not sell_rows.empty:
+                            last_sell_row = sell_rows.iloc[-1]
+                            last_sell_date = last_sell_row.name.date()
+                            last_bar_date = signals_df.index[-1].date()
+
+                            # Freshness filter
+                            if only_latest_bar_exit and last_sell_date != last_bar_date:
+                                pass  # Skip older signals
+                            else:
+                                if show_debug_exit:
+                                    with debug_container_exit.container():
+                                        with st.expander(f"❌ {symbol} SELL Debug", expanded=False):
+                                            st.json({
+                                                'Last_SELL_Date': last_sell_date.strftime('%Y-%m-%d'),
+                                                'Last_Bar_Date': last_bar_date.strftime('%Y-%m-%d'),
+                                                'RSI': f"{float(last_sell_row.get('RSI', 0)):.1f}",
+                                                'Close_Price': f"₹{float(last_sell_row.get('Close', 0)):.0f}",
+                                                'Sell_Signal': 1,
+                                                'RSI_Above_50': float(last_sell_row.get('RSI', 0)) > 50
+                                            })
+
+                                # Add SELL signal only
+                                exit_signals.append({
+                                    'Symbol': symbol,
+                                    'Signal': 'SELL',
+                                    'Price': float(last_sell_row['Close']),
+                                    'RSI': float(last_sell_row['RSI']),
+                                    'Signal_Date': last_sell_row.name.strftime('%Y-%m-%d')
+                                })
+
+            except Exception:
+                pass
+
+            progress.progress((i + 1) / len(exit_symbols))
+
+        if exit_signals:
+            exit_df = pd.DataFrame(exit_signals)
+            
+            # Full row red coloring for SELL signals
+            def color_sell_row(signal):
+                return ['background-color: #ffebee'] * len(exit_df.columns)  # light red
+
+            styled_exit_df = exit_df.style.format({
+                'Price': '₹{:.0f}',
+                'RSI': '{:.1f}'
+            }).apply(lambda row: color_sell_row(row['Signal']), axis=1)
+
+            st.error(f"❌ Found {len(exit_signals)} SELL signals!")
+            st.dataframe(styled_exit_df, use_container_width=True, hide_index=True)
+            
+            csv_exit = exit_df.to_csv(index=False)
+            st.download_button("📥 Download SELL Signals", csv_exit, "exit_signals.csv")
+            
+        else:
+            st.success("✅ No SELL signals found. Good to hold current positions!")
+            if show_debug_exit:
+                st.info("🔍 No stocks triggered bearish divergence conditions.")
+    
+            
 
 st.markdown("---")
 st.caption("🎯 **Trading App**")
